@@ -2,16 +2,41 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Redirecting to Verification Portal...</title>
-  <script>
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzX46fEKYlD1MAvtUrG1mMh1H5151r8kEjlVxOxpbOkH921sQ-nKaqyWAqa17hQnRxk0g/exec";
-    
-    // Pass along ?g=...&t=... query parameters
-    window.location.href = WEB_APP_URL + window.location.search;
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DDUC Student Verification</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #f4f6f8;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      outline: none;
+      display: block;
+    }
+  </style>
 </head>
-<body style="font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #f4f6f8; color: #333;">
-  <p>Loading DDUC Verification Card...</p>
+<body>
+
+  <iframe id="appFrame" allow="autoplay"></iframe>
+
+  <script>
+    // Active Google Apps Script Web App Endpoint
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzX46fEKYlD1MAvtUrG1mMh1H5151r8kEjlVxOxpbOkH921sQ-nKaqyWAqa17hQnRxk0g/exec";
+    
+    // Pass query parameters (?g=...&t=...) into the iframe
+    const queryString = window.location.search;
+    document.getElementById("appFrame").src = WEB_APP_URL + queryString;
+  </script>
+
 </body>
 </html>
