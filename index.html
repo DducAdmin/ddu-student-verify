@@ -1,348 +1,468 @@
-/*******************************************************
- * DDUC STUDENT QR VERIFICATION SYSTEM
- * Google Apps Script Backend (Code.gs)
- *******************************************************
- */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DDUC Student Verification</title>
+  <style>
+    :root {
+      --primary-navy: #0F172A;
+      --secondary-blue: #1E3A8A;
+      --accent-green: #059669;
+      --accent-green-bg: #ECFDF5;
+      --bg-slate: #F1F5F9;
+      --card-bg: #FFFFFF;
+      --tile-bg: #F8FAFC;
+      --text-primary: #1E293B;
+      --text-secondary: #64748B;
+      --border-color: #E2E8F0;
+    }
 
-const SPREADSHEET_ID = "1QR3hNlmnfOjzkYmIjJrM6XsqBgEq2Mh7OEMBY1cDX5I";
-const PHOTO_FOLDER_ID = "16kW_xXqPz0j9-riOIpzghSM7Bij2qcbu";
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwlQVMdrXQEdt5wZAgypOd98zQZr-1B7b5LB4kNlB77xjThso3aG_GRBDEcoRRGpPWvLQ/exec";
-const GITHUB_PAGES_URL = "https://dducadmin.github.io/ddu-student-verify/";
-const SECRET_KEY = "DDUC_SECURE_AUTH_KEY_2026_98x7A2F";
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
 
-const GROUPS = {
-  original: "Original",
-  group2: "Group 2",
-  group3: "Group 3",
-  group4: "Group 4",
-  group5: "Group 5",
-  group6: "Group 6"
-};
+    body {
+      background-color: var(--bg-slate);
+      color: var(--text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 12px;
+    }
 
-const TOKEN_COLUMN = 17; // Column Q default fallback
+    /* LOADING & ERROR OVERLAY */
+    #state-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg-slate);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      padding: 20px;
+    }
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("QR Tools")
-    .addItem("Generate Tokens & QR Links", "prepareAllGroups")
-    .addToUi();
-}
+    .spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid var(--border-color);
+      border-top: 4px solid var(--primary-navy);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
 
-/**
- * Formats date values into DD-MM-YYYY format.
- */
-function formatDateDDMMYYYY(val) {
-  if (!val || val === "N/A") return "N/A";
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
 
-  if (val instanceof Date) {
-    return Utilities.formatDate(val, Session.getScriptTimeZone(), "dd-MM-yyyy");
-  }
+    .state-text {
+      margin-top: 16px;
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      font-weight: 600;
+      text-align: center;
+    }
 
-  const strVal = String(val).trim();
-  if (!strVal) return "N/A";
+    .error-card {
+      max-width: 400px;
+      width: 100%;
+      background: #FFFFFF;
+      padding: 28px;
+      border-radius: 14px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.08);
+      text-align: center;
+      border: 1px solid var(--border-color);
+    }
 
-  if (/^\d{2}-\d{2}-\d{4}$/.test(strVal)) return strVal;
+    .error-card h2 {
+      color: #C62828;
+      margin: 12px 0 8px;
+      font-size: 1.25rem;
+    }
 
-  if (/^\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/.test(strVal)) {
-    const parts = strVal.split('T')[0].split(/[\/-]/);
-    return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
-  }
+    .error-card p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
 
-  if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}$/.test(strVal)) {
-    const parts = strVal.split(/[\/-]/);
-    return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
-  }
+    /* CARD CONTAINER */
+    .verification-card {
+      width: 100%;
+      max-width: 620px;
+      background: var(--card-bg);
+      border-radius: 16px;
+      box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+      display: none;
+    }
 
-  const d = new Date(strVal);
-  if (!isNaN(d.getTime())) {
-    return Utilities.formatDate(d, Session.getScriptTimeZone(), "dd-MM-yyyy");
-  }
+    .card-header {
+      background: linear-gradient(135deg, var(--primary-navy) 0%, var(--secondary-blue) 100%);
+      color: #FFFFFF;
+      padding: 18px 20px;
+      text-align: center;
+    }
 
-  return strVal;
-}
+    .college-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
 
-function doGet(e) {
-  let groupKey = "original";
-  let token = "";
+    .college-subtitle {
+      font-size: 0.78rem;
+      color: #93C5FD;
+      font-weight: 500;
+      margin-top: 3px;
+      letter-spacing: 0.3px;
+    }
 
-  if (e && e.parameter && e.parameter.g) groupKey = String(e.parameter.g).trim().toLowerCase();
-  if (e && e.parameter && e.parameter.t) token = String(e.parameter.t).trim();
+    .status-banner {
+      background-color: var(--accent-green-bg);
+      color: var(--accent-green);
+      border-bottom: 1px solid #A7F3D0;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
 
-  if (!token) return showError("No security token was provided.");
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      position: relative;
+    }
 
-  let targetSheet = getGroupSheet(groupKey);
-  let result = searchSheetForToken(targetSheet, token);
-  let activeGroupName = GROUPS[groupKey] || "Original";
+    .status-dot::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
 
-  if (!result) {
-    const groupKeys = Object.keys(GROUPS);
-    for (let i = 0; i < groupKeys.length; i++) {
-      if (groupKeys[i] === groupKey) continue;
-      const altSheet = getGroupSheet(groupKeys[i]);
-      result = searchSheetForToken(altSheet, token);
-      if (result) {
-        activeGroupName = GROUPS[groupKeys[i]];
-        break;
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.8; }
+      70% { transform: scale(2.5); opacity: 0; }
+      100% { transform: scale(1); opacity: 0; }
+    }
+
+    .photo-section {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px 20px 10px 20px;
+      background: #FFFFFF;
+    }
+
+    .avatar-wrapper {
+      width: 110px;
+      height: 135px;
+      flex-shrink: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 3px solid #FFFFFF;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+      background-color: var(--tile-bg);
+    }
+
+    .avatar-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .details-grid {
+      padding: 12px 20px 20px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .detail-item {
+      background-color: var(--tile-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .detail-item.full-width {
+      grid-column: span 2;
+    }
+
+    .detail-label {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .detail-value {
+      font-size: 0.92rem;
+      color: var(--text-primary);
+      font-weight: 700;
+      word-break: break-word;
+      margin-top: 3px;
+    }
+
+    .detail-value.name-highlight {
+      font-size: 1.15rem;
+      color: var(--primary-navy);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--accent-green);
+      font-weight: 800;
+    }
+
+    .card-footer {
+      background-color: var(--tile-bg);
+      padding: 10px 20px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .group-tag {
+      font-weight: 700;
+      color: var(--secondary-blue);
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      .card-header { padding: 14px 16px; }
+      .college-title { font-size: 1.05rem; }
+      .photo-section { padding: 16px 16px 8px 16px; }
+      .avatar-wrapper { width: 95px; height: 118px; }
+      .details-grid { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 14px 16px 14px; }
+      .detail-item { padding: 8px 10px; }
+      .detail-label { font-size: 0.64rem; }
+      .detail-value { font-size: 0.85rem; }
+      .detail-value.name-highlight { font-size: 1rem; }
+      .card-footer { padding: 10px 14px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOADING / ERROR OVERLAY -->
+  <div id="state-overlay">
+    <div id="loader-content">
+      <div class="spinner"></div>
+      <div class="state-text">Verifying credentials...</div>
+    </div>
+    <div id="error-content" style="display: none;">
+      <div class="error-card">
+        <div style="font-size: 42px;">❌</div>
+        <h2>Invalid QR Code</h2>
+        <p id="error-message">This QR code is not valid or the record no longer exists.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- VERIFICATION CARD -->
+  <div class="verification-card" id="card-container">
+    <div class="card-header">
+      <div class="college-title">Deen Dayal Upadhyaya College</div>
+      <div class="college-subtitle">University of Delhi • Student ID Verification</div>
+    </div>
+
+    <div class="status-banner">
+      <span class="status-dot"></span>
+      <span>VERIFIED STUDENT RECORD</span>
+    </div>
+
+    <div class="photo-section">
+      <div class="avatar-wrapper">
+        <img 
+          id="student-photo" 
+          src="" 
+          alt="Student Photo" 
+          onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'110\' height=\'135\' viewBox=\'0 0 110 135\' fill=\'%23F8FAFC\'><rect width=\'100%\' height=\'100%\'/><text x=\'50%\' y=\'50%\' font-family=\'sans-serif\' font-size=\'12\' fill=\'%2364748B\' text-anchor=\'middle\' dy=\'.3em\'>No Photo</text></svg>';"
+        >
+      </div>
+    </div>
+
+    <div class="details-grid">
+      <div class="detail-item full-width">
+        <span class="detail-label">Student Name</span>
+        <span class="detail-value name-highlight" id="student-name">--</span>
+      </div>
+
+      <div class="detail-item full-width">
+        <span class="detail-label">Course Name</span>
+        <span class="detail-value" id="student-course">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">College Roll No.</span>
+        <span class="detail-value" id="student-roll">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Exam Roll No.</span>
+        <span class="detail-value" id="student-exam-roll">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Father's Name</span>
+        <span class="detail-value" id="student-father">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Date of Birth</span>
+        <span class="detail-value" id="student-dob">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Admission Year</span>
+        <span class="detail-value" id="student-admission-year">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Student Mobile</span>
+        <span class="detail-value" id="student-mobile">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Father's Mobile</span>
+        <span class="detail-value" id="father-mobile">--</span>
+      </div>
+
+      <div class="detail-item">
+        <span class="detail-label">Valid Upto</span>
+        <span class="detail-value" id="student-valid-upto">--</span>
+      </div>
+
+      <div class="detail-item full-width">
+        <span class="detail-label">Institutional Email</span>
+        <span class="detail-value" id="student-email">--</span>
+      </div>
+
+      <div class="detail-item full-width">
+        <span class="detail-label">Local Address</span>
+        <span class="detail-value" id="student-address">--</span>
+      </div>
+
+      <div class="detail-item full-width">
+        <span class="detail-label">Status</span>
+        <span class="detail-value status-pill">✓ <span id="student-status">Verified</span></span>
+      </div>
+    </div>
+
+    <div class="card-footer">
+      <span>Group: <strong class="group-tag" id="group-name">--</strong></span>
+      <span>Scanned: <strong id="scan-time">--:--</strong></span>
+    </div>
+  </div>
+
+  <script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzyng7VUSgmvVEeFBseYPchZAcjE5YmkcvUZ82UBZcsS9fIA9Z8zmgW3kNOLvL0igwe/exec";
+
+    function verifyStudent() {
+      const overlay = document.getElementById("state-overlay");
+      const cardContainer = document.getElementById("card-container");
+
+      const queryString = window.location.search;
+      if (!queryString) {
+        showError("No security parameters provided.");
+        return;
       }
-    }
-  }
 
-  if (!result) return showError("This QR code is not valid or the record no longer exists.");
+      // Generate dynamic JSONP callback to resolve CORS policy cleanly
+      const callbackName = "jsonp_cb_" + Math.floor(Math.random() * 1000000);
 
-  const headers = result.headers;
-  const studentRow = result.row;
-  const cleanHeaders = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+      window[callbackName] = function(data) {
+        delete window[callbackName];
+        if (scriptTag.parentNode) {
+          scriptTag.parentNode.removeChild(scriptTag);
+        }
 
-  function getVal(aliases) {
-    for (let i = 0; i < aliases.length; i++) {
-      const cleanAlias = aliases[i].toLowerCase().replace(/[^a-z0-9]/g, "");
-      const idx = cleanHeaders.indexOf(cleanAlias);
-      if (idx !== -1 && studentRow[idx] !== undefined && studentRow[idx] !== "") {
-        return studentRow[idx];
-      }
-    }
+        if (!data.success) {
+          showError(data.message || "Invalid or expired QR code.");
+          return;
+        }
 
-    const sortedAliases = aliases.slice().sort((a, b) => b.length - a.length);
-    for (let i = 0; i < sortedAliases.length; i++) {
-      const cleanAlias = sortedAliases[i].toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (cleanAlias.length < 3) continue;
-      const idx = cleanHeaders.findIndex(ch => ch.includes(cleanAlias));
-      if (idx !== -1 && studentRow[idx] !== undefined && studentRow[idx] !== "") {
-        return studentRow[idx];
-      }
-    }
-    return "N/A";
-  }
+        populateCard(data.student, data.groupName);
+        overlay.style.display = "none";
+        cardContainer.style.display = "block";
+      };
 
-  const rollNo = String(getVal(["roll no", "rollno", "student roll no"])).trim();
+      const scriptTag = document.createElement("script");
+      scriptTag.src = WEB_APP_URL + queryString + "&callback=" + callbackName;
+      
+      scriptTag.onerror = function() {
+        showError("Unable to reach verification server. Ensure Apps Script deployment access is set to 'Anyone'.");
+      };
 
-  const student = {
-    photoUrl: getStudentPhotoUrl(rollNo),
-    name: String(getVal(["name", "student name", "student's name"])).trim(),
-    fatherName: String(getVal(["father name", "father's name", "fathername"])).trim(),
-    rollNo: rollNo,
-    courseName: String(getVal(["course name", "coursename", "course"])).trim(),
-    yearOfAdmission: String(getVal(["year of admission", "admission year", "admissionyear"])).trim(),
-    examRollNo: String(getVal(["exam roll no", "examrollno", "examination roll no"])).trim(),
-    studentMobile: String(getVal(["student mobile", "student mobile no", "student mobile no.", "mobile no", "mobile"])).trim(),
-    fatherMobile: String(getVal(["father mobile", "father mobile no", "father mobile no.", "father's mobile", "father's mobile no", "father contact", "father phone"])).trim(),
-    institutionalEmail: String(getVal(["institutional email id", "institutional email", "inst email id", "inst email", "college email", "email id", "email"])).trim(),
-    localAddress: String(getVal(["local address", "localaddress", "address"])).trim(),
-    validUpto: formatDateDDMMYYYY(getVal(["valid upto", "validity", "valid until"])),
-    status: String(getVal(["status"])).trim(),
-    dob: formatDateDDMMYYYY(getVal(["dob", "date of birth"]))
-  };
-
-  const template = HtmlService.createTemplateFromFile("Index");
-  template.student = student;
-  template.groupName = activeGroupName;
-
-  return template
-    .evaluate()
-    .setTitle("DDUC Student Verification")
-    .addMetaTag("viewport", "width=device-width, initial-scale=1, maximum-scale=1")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function getStudentPhotoUrl(rollNo) {
-  const fallback = "https://via.placeholder.com/130x160?text=No+Photo";
-  if (!rollNo || rollNo === "N/A") return fallback;
-
-  const cleanRollNo = String(rollNo).trim();
-  const cache = CacheService.getScriptCache();
-  const cachedUrl = cache.get("PHOTO_" + cleanRollNo);
-  if (cachedUrl) return cachedUrl;
-
-  try {
-    const folder = DriveApp.getFolderById(PHOTO_FOLDER_ID);
-    // Flexible search matching roll number without strict trailing dot
-    const searchQuery = `title contains '${cleanRollNo}' and trashed = false`;
-    const files = folder.searchFiles(searchQuery);
-
-    if (files.hasNext()) {
-      const file = files.next();
-      const photoUrl = "https://lh3.googleusercontent.com/d/" + file.getId();
-      cache.put("PHOTO_" + cleanRollNo, photoUrl, 21600); // Cache for 6 hours
-      return photoUrl;
-    }
-  } catch (err) {
-    Logger.log("Drive Search Error: " + err.message);
-  }
-
-  return fallback;
-}
-
-function searchSheetForToken(sheet, token) {
-  if (!sheet) return null;
-  const displayValues = sheet.getDataRange().getDisplayValues();
-  if (displayValues.length < 2) return null;
-
-  const headers = displayValues[0];
-  const cleanHeaders = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
-
-  let tokenCol = cleanHeaders.indexOf("qrtoken");
-  if (tokenCol === -1) tokenCol = TOKEN_COLUMN - 1;
-
-  for (let i = 1; i < displayValues.length; i++) {
-    if (String(displayValues[i][tokenCol]).trim() === token) {
-      return { row: displayValues[i], headers: headers };
-    }
-  }
-  return null;
-}
-
-function getGroupSheet(groupKey) {
-  const sheetName = GROUPS[groupKey];
-  if (!sheetName) return null;
-
-  let ss;
-  try {
-    ss = SpreadsheetApp.getActiveSpreadsheet();
-  } catch (err) {
-    ss = null;
-  }
-  if (!ss) ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return ss.getSheetByName(sheetName) || null;
-}
-
-function showError(message) {
-  const safeMessage = String(message)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-
-  return HtmlService.createHtmlOutput(
-    "<!DOCTYPE html><html><head>" +
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>" +
-    "<title>Invalid QR Code</title></head>" +
-    "<body style='margin:0;padding:25px;font-family:Arial,sans-serif;background:#f4f6f8;text-align:center;'>" +
-    "<div style='max-width:480px;margin:45px auto;background:#fff;padding:28px;border-radius:14px;box-shadow:0 3px 18px rgba(0,0,0,.10);'>" +
-    "<div style='font-size:42px;'>❌</div>" +
-    "<h2 style='color:#c62828;margin:10px 0 12px;'>Invalid QR Code</h2>" +
-    "<p style='color:#555;line-height:1.5;'>" + safeMessage + "</p>" +
-    "</div></body></html>"
-  )
-  .setTitle("Invalid QR Code")
-  .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function createHmacToken(groupKey, rowNumber) {
-  const payload = groupKey + "_" + rowNumber + "_" + Utilities.getUuid() + "_" + Date.now();
-  const signature = Utilities.computeHmacSignature(
-    Utilities.MacAlgorithm.HMAC_SHA_256,
-    payload,
-    SECRET_KEY,
-    Utilities.Charset.UTF_8
-  );
-  return signature.map(byte => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('');
-}
-
-function generateTokensForAllGroups() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const usedTokens = new Set();
-
-  Object.keys(GROUPS).forEach(groupKey => {
-    const sheet = ss.getSheetByName(GROUPS[groupKey]);
-    if (!sheet) return;
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return;
-
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
-    const cleanHeaders = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
-    
-    let tokenCol = cleanHeaders.indexOf("qrtoken") + 1;
-    if (tokenCol === 0) tokenCol = TOKEN_COLUMN;
-
-    sheet.getRange(1, tokenCol).setValue("QR TOKEN");
-    const range = sheet.getRange(2, tokenCol, lastRow - 1, 1);
-    range.setNumberFormat("@");
-    
-    const values = range.getValues();
-    let changed = false;
-
-    for (let i = 0; i < values.length; i++) {
-      const existing = String(values[i][0] || "").trim();
-      if (!existing) {
-        let token;
-        do {
-          token = createHmacToken(groupKey, i + 2);
-        } while (usedTokens.has(token));
-
-        values[i][0] = token;
-        usedTokens.add(token);
-        changed = true;
-      } else {
-        usedTokens.add(existing);
-      }
+      document.body.appendChild(scriptTag);
     }
 
-    if (changed) range.setValues(values);
-  });
+    function showError(msg) {
+      document.getElementById("loader-content").style.display = "none";
+      document.getElementById("error-message").innerText = msg;
+      document.getElementById("error-content").style.display = "block";
+    }
 
-  SpreadsheetApp.flush();
-}
+    function populateCard(student, groupName) {
+      document.getElementById("student-photo").src = student.photoUrl;
+      document.getElementById("student-name").innerText = student.name;
+      document.getElementById("student-course").innerText = student.courseName;
+      document.getElementById("student-roll").innerText = student.rollNo;
+      document.getElementById("student-exam-roll").innerText = student.examRollNo;
+      document.getElementById("student-father").innerText = student.fatherName;
+      document.getElementById("student-dob").innerText = student.dob;
+      document.getElementById("student-admission-year").innerText = student.yearOfAdmission;
+      document.getElementById("student-mobile").innerText = student.studentMobile;
+      document.getElementById("father-mobile").innerText = student.fatherMobile;
+      document.getElementById("student-valid-upto").innerText = student.validUpto;
+      document.getElementById("student-email").innerText = student.institutionalEmail;
+      document.getElementById("student-address").innerText = student.localAddress;
+      document.getElementById("student-status").innerText = student.status;
+      document.getElementById("group-name").innerText = groupName;
 
-function generateQRLinksForAllGroups() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+      document.getElementById("scan-time").innerText = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
 
-  Object.keys(GROUPS).forEach(groupKey => {
-    const sheet = ss.getSheetByName(GROUPS[groupKey]);
-    if (!sheet) return;
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return;
-
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
-    const cleanHeaders = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
-    
-    let linkCol = cleanHeaders.indexOf("qrlink") + 1;
-    let qrCol = cleanHeaders.indexOf("qr") + 1;
-    let tokenCol = cleanHeaders.indexOf("qrtoken") + 1;
-
-    if (linkCol === 0) linkCol = 16;
-    if (tokenCol === 0) tokenCol = 17;
-    if (qrCol === 0) qrCol = 18;
-
-    sheet.getRange(1, linkCol).setValue("QR LINK");
-    sheet.getRange(1, qrCol).setValue("QR");
-
-    const tokens = sheet.getRange(2, tokenCol, lastRow - 1, 1).getValues();
-    const links = [];
-    const qrFormulas = [];
-    const linkColLetter = getColumnLetter(linkCol);
-
-    tokens.forEach((row, index) => {
-      const token = String(row[0] || "").trim();
-      const rowNum = index + 2;
-
-      if (!token) {
-        links.push([""]);
-        qrFormulas.push([""]);
-      } else {
-        const fullUrl = GITHUB_PAGES_URL + "?g=" + encodeURIComponent(groupKey) + "&t=" + encodeURIComponent(token);
-        links.push([fullUrl]);
-        qrFormulas.push(['=IF(ISBLANK(' + linkColLetter + rowNum + '), "", IMAGE("https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=" & ENCODEURL(' + linkColLetter + rowNum + ')))']);
-      }
-    });
-
-    sheet.getRange(2, linkCol, links.length, 1).setValues(links);
-    sheet.getRange(2, qrCol, qrFormulas.length, 1).setFormulas(qrFormulas);
-  });
-
-  SpreadsheetApp.flush();
-}
-
-function getColumnLetter(colIndex) {
-  let temp, letter = '';
-  while (colIndex > 0) {
-    temp = (colIndex - 1) % 26;
-    letter = String.fromCharCode(65 + temp) + letter;
-    colIndex = Math.floor((colIndex - temp) / 26);
-  }
-  return letter;
-}
-
-function prepareAllGroups() {
-  generateTokensForAllGroups();
-  generateQRLinksForAllGroups();
-}
+    verifyStudent();
+  </script>
+</body>
+</html>
